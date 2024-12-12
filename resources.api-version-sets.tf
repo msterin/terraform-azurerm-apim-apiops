@@ -28,4 +28,5 @@ resource "azurerm_api_management_api_version_set" "main" {
   description         = try(jsondecode(file("${local.api_version_sets_path}/${each.key}/${local.api_version_set_information_file}")).properties.description, null)
   version_header_name = try(jsondecode(file("${local.api_version_sets_path}/${each.key}/${local.api_version_set_information_file}")).properties.versionHeaderName, null)
   version_query_name  = try(jsondecode(file("${local.api_version_sets_path}/${each.key}/${local.api_version_set_information_file}")).properties.versionQueryName, null)
+
 }

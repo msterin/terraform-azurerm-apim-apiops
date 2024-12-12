@@ -21,14 +21,14 @@ locals {
   # }
   operation_policies_map = {
     for path in local.all_operations_policy_files_names :
-    format("%s.%s",                                                                # Unique key for easy reference
-      element(split("/", path), length(split("/", path)) - 4),                     # API name
-      element(split("/", path), length(split("/", path)) - 2)                      # Op name
-      ) => {                                                                       # node content:
-      api_name           = element(split("/", path), length(split("/", path)) - 4) # API name
-      op_name            = element(split("/", path), length(split("/", path)) - 2) # Op name
-      policy_file_name   = path                                                    # Full path to file
-      policy_xml_content = file(path)
+    format("%s.%s",                                                  # Unique key for easy reference
+      basename(dirname(dirname(dirname(path)))),                     # API name, 3 levels up
+      basename(dirname(path))                                        # Op name
+      ) => {                                                         # node content:
+      api_name           = basename(dirname(dirname(dirname(path)))) # API name, 3 levels up
+      op_name            = basename(dirname(path))                   # Op name
+      policy_file_name   = path                                      # Full path to file
+      policy_xml_content = templatefile(path, {})                    # TODO: pass vars
     }
   }
 
@@ -36,13 +36,13 @@ locals {
 
   operation_info_map = {
     for path in local.all_operations_info_files_names :
-    format("%s.%s",                                                            # Unique key for easy reference
-      element(split("/", path), length(split("/", path)) - 4),                 # API name
-      element(split("/", path), length(split("/", path)) - 2)                  # Op name
-      ) => {                                                                   # node content:
-      api_name       = element(split("/", path), length(split("/", path)) - 4) # API name
-      op_name        = element(split("/", path), length(split("/", path)) - 2) # Op name
-      info_file_name = path                                                    # Full path to file
+    format("%s.%s",                                              # Unique key for easy reference
+      basename(dirname(dirname(dirname(path)))),                 # API name, 3 levels up
+      basename(dirname(path))                                    # Op name
+      ) => {                                                     # node content:
+      api_name       = basename(dirname(dirname(dirname(path)))) # API name, 3 levels up
+      op_name        = basename(dirname(path))                   # Op name
+      info_file_name = path                                      # Full path to file
       op_info        = jsondecode(file(path))
     }
   }
@@ -55,7 +55,7 @@ resource "azurerm_api_management_api_operation_policy" "main" {
   api_management_name = data.azurerm_api_management.main.name
   resource_group_name = data.azurerm_api_management.main.resource_group_name
   operation_id        = each.value.op_name
-  xml_content         = file("${each.value.policy_file_name}")
+  xml_content         = each.value.policy_xml_content
 
   depends_on = [azurerm_api_management_api_operation.main]
 }
@@ -94,20 +94,11 @@ resource "azurerm_api_management_api_operation" "main" {
       error_message = "A mandatory field (one of '${join(", ", local.required_fields)}') is missing in ${each.value.info_file_name}"
     }
   }
-  # lifecycle {
-  #   precondition {
-  #     # alltrue[for op in local.operation_info_map:
-  #     condition = length(setsubtract(toset(local.required_fields), toset(keys(each.value.op_info)))) == 0
-  #     # error_message = "Json file for operatiosetsubtractn ${each.value.op_name} is missing required fields ${setsubtract(local.required_fields, keys(each.value.op_info))} : ${each.value.info_file_name}"
-  #     error_message = " bad"
-  #   }
-  # }
 
   depends_on = [
     azurerm_api_management_api.main,
     azurerm_api_management_backend.main,
-    azurerm_api_management_named_value.main,
-    azurerm_api_management_certificate.main
+    azurerm_api_management_named_value.main
   ]
 }
 

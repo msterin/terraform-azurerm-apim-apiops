@@ -56,20 +56,19 @@ variable "api_information_filename" {
   default     = "apiInformation.json"
 }
 
-variable "api_specification_filename_json" {
-  description = "(Optional) Filename for the API specification JSON file."
+variable "api_specification_filename" {
+  description = "(Optional) Filename for the API specification JSON or YAML file."
   type        = string
   default     = "specification.json"
-}
 
-variable "api_specification_filename_yaml" {
-  description = "(Optional) Filename for the API specification YAML file."
-  type        = string
-  default     = "specification.yaml"
+  validation {
+    condition     = endswith(var.api_specification_filename, ".json") || endswith(var.api_specification_filename, ".yaml")
+    error_message = "The api_specification_filename must end with either .json or .yaml"
+  }
 }
 
 variable "api_policy_filename" {
-  description = "(Optional) Filename for the API policy file."
+  description = "(Optional) Filename for the API policy XML file."
   type        = string
   default     = "policy.xml"
 }

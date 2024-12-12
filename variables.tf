@@ -35,7 +35,7 @@ variable "application_insights_name" {
 }
 
 variable "application_insights_resource_group_name" {
-  description = "(Optional) The name of the Resource Group in which the pplication Insights component exists."
+  description = "(Optional) The name of the Resource Group in which the Application Insights component exists."
   type        = string
   default     = null
 }
@@ -79,6 +79,15 @@ variable "api_policy_fallback_to_default_filename" {
   type        = bool
   default     = false
 }
+
+## api operations
+## note - we reuse API policy file name for operation policy file name
+variable "api_operation_filename" {
+  description = "(Optional) Filename for the API operation configuration file."
+  type        = string
+  default     = "operationInformation.json"
+}
+
 
 ## backends
 variable "backend_information_filename" {

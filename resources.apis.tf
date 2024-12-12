@@ -116,11 +116,13 @@ resource "azurerm_api_management_api" "main" {
       error_message = "API without path is not allowed. Set 'allow_api_without_path' to 'true' to allow this."
     }
   }
+
+  depends_on = [azurerm_api_management_api_version_set.main, azurerm_api_management_tag.main]
 }
 
 # Assign tag(s) on API
 resource "azurerm_api_management_api_tag" "main" {
-  # Create set with "<api name>/<tag name>". In this way we can then itterate over all tags for each API.
+  # Create set with "<api name>/<tag name>". In this way we can then iterate over all tags for each API.
   # Only create if tags are defined in API information file, and a API specification file exists.
   for_each = toset(flatten(
     [for directory in local.apis :

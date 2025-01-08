@@ -19,4 +19,4 @@ Adds support for API Operations, self-managed gateways and policy fragments, tem
 
 The diagram below illustrates the flow of APIM APIOps.
 
-[![APIM APIOps flow](https://github.com/robertbrandso/terraform-azurerm-apim-apiops/wiki/images/apiops-flow.drawio.png)](https://github.com/robertbrandso/terraform-azurerm-apim-apiops/wiki/images/apiops-flow.drawio.png)
+[![APIM APIOps flow](https://github.com/msterin/terraform-azurerm-apim-apiops/wiki/images/apiops-flow.drawio.png)](https://github.com/msterin/terraform-azurerm-apim-apiops/wiki/images/apiops-flow.drawio.png)

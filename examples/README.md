@@ -1,6 +1,9 @@
 # APIM APIOps examples
-This folder contains an example on how to use the APIM APIOps module, containing both example configuration for calling the Terraform module and configuration files in the [artifacts folder](https://github.com/robertbrandso/terraform-azurerm-apim-apiops/wiki/01-Artifacts-folder).
 
-Check out [What can be managed by APIM APIOps?](https://github.com/robertbrandso/terraform-azurerm-apim-apiops/wiki/02-What-can-be-managed-by-APIM-APIOps%3F) for detailed information about configuration files in the artifacts folder.
+This folder contains an example on how to use the APIM APIOps module, containing both example configuration for calling the Terraform module and configuration files in the [artifacts folder](https://github.com/msterin/terraform-azurerm-apim-apiops/wiki/01-Artifacts-folder).
 
-To see other examples on how to configure the module, check out the [examples page in the wiki](https://github.com/robertbrandso/terraform-azurerm-apim-apiops/wiki/03-Examples).
+Check out [What can be managed by APIM APIOps?](https://github.com/msterin/terraform-azurerm-apim-apiops/wiki/02-What-can-be-managed-by-APIM-APIOps%3F) for detailed information about configuration files in the artifacts folder.
+
+To see other examples on how to configure the module, check out the [examples page in the wiki](https://github.com/msterin/terraform-azurerm-apim-apiops/wiki/03-Examples).
+
+These are examples for the original module, by robertbrandso

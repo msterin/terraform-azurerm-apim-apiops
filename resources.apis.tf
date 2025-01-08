@@ -4,7 +4,7 @@
 
 # If information file does not exist, we assume the user just wants to manage policies
 # for an existing API and we don't need to create the API itself (thus we also ignore specs/swagger file if any)
-
+#
 # Оtherwise we create the API and (optionally) the policy. Note that in this case both information and specification files are mandatory and must exist.
 
 #
@@ -30,11 +30,11 @@ locals {
   # Form maps for resource creation - each map element will be used to create a resource (API or policy)
   # if map is empty, the correspondent resources will not be created
 
-  # API Map: "api name" => { info=<info object, decoded from json file>, spec=<spec file content> }
+  # API Map: "api name" => { properties=<properties object, decoded from json file>, spec=<spec file content> }
   apis_map = {
     for info_file_name in local.all_apis_info_files_names :
     basename(dirname(info_file_name)) => {
-      info           = jsondecode(templatefile(info_file_name, {})) # todo: pass a map with variables
+      properties     = jsondecode(templatefile(info_file_name, var.template_variables)).properties
       spec_file_name = "${dirname(info_file_name)}/${local.api_specification_file}"
     }
   }
@@ -43,14 +43,14 @@ locals {
   api_policies_map = {
     for policy_file_name in local.all_apis_policy_files_names :
     basename(dirname(policy_file_name)) => {
-      content = file(policy_file_name)
+      xml_content = templatefile(policy_file_name, var.template_variables)
     }
   }
 
   # a helper - all a list of {api_name, tag_name} pairs
   api_tag_pairs = flatten([
     for api_name, value in local.apis_map : [
-      for tag in try(value.info.properties.tags, []) : {
+      for tag in try(value.properties.tags, []) : {
         tag_name = tag
         api_name = api_name
     }]
@@ -64,14 +64,31 @@ locals {
     }
   }
 
-  # Per-API diagnostic log settings
-  api_diagnostic_logs_map = {
-    for api_name, value in local.apis_map : api_name => {
-      diagnosticLogs = value.info.properties.diagnosticLogs
-      info           = value.info
-    } if can(value.info.properties.diagnosticLogs)
-  }
+  # the incoming spec has something like "/api/v4" in it which needs to be removed so APIM has the correct routes with no base.
+  # the caller is responsible for providing backend path/info in template_variables , but it's optional
+  # - backend_api_path default is 'api'
+  # - if backend_api_version is NOT provides, no changes to swagger on imports. Otherwise, the string below will be dropped from routes
+  route_path_base_to_remove = can(var.template_variables.backend_api_version) ? "/${try(var.template_variables.backend_api_path, "api")}/${var.template_variables.backend_api_version}" : ""
 
+
+  # app insights and logging info
+  # ==============================
+  # Per-API diagnostic log settings { apo_name => { diagnosticLogs = <diagnosticLogs object from apiInfo> } }
+  api_diagnostic_logs_map = local.application_insights_enabled ? {
+    for api_name, value in local.apis_map : api_name => {
+      diagnosticLogs = value.properties.diagnosticLogs
+    } if can(value.properties.diagnosticLogs)
+  } : {}
+
+  application_insights_enabled     = var.application_insights_name != null && var.application_insights_resource_group_name != null
+  application_insights_logger_name = var.application_insights_logger_name != null ? var.application_insights_logger_name : "app-insights-logger-${random_string.logger_suffix.result}"
+}
+
+# random string to add to logger name to make sure it can be different per set of APIs
+resource "random_string" "logger_suffix" {
+  length  = 8
+  special = false
+  upper   = false
 }
 
 # Create API
@@ -83,65 +100,73 @@ resource "azurerm_api_management_api" "main" {
   resource_group_name = data.azurerm_api_management.main.resource_group_name
   api_type            = "http"
 
-  display_name = each.value.info.properties.displayName
-  description  = try(each.value.info.properties.description, null)
+  display_name = each.value.properties.displayName
+  description  = try(each.value.properties.description, null)
 
-  revision              = try(each.value.info.properties.apiRevision, 1)
-  subscription_required = try(each.value.info.properties.subscriptionRequired, true)
-  protocols             = try(each.value.info.properties.protocols, ["https"])
+  revision              = try(each.value.properties.apiRevision, 1)
+  subscription_required = try(each.value.properties.subscriptionRequired, true)
+  protocols             = try(each.value.properties.protocols, ["https"])
 
-  service_url          = try(each.value.info.properties.serviceUrl, null)
-  terms_of_service_url = try(each.value.info.properties.termsOfService, null)
+  service_url          = try(each.value.properties.serviceUrl, null)
+  terms_of_service_url = try(each.value.properties.termsOfService, null)
 
   # Set var.allow_api_without_path to false or true to choose between if the path property should be mandatory or not.
   # This is controlled and checked in the postcondition block.
-  path = try(each.value.info.properties.path, null)
+  path = try(each.value.properties.path, null)
 
   # If version is set, version_set_id also need to be set.
   # version_set_id depends on azurerm_api_management_api_version_set.main
-  version        = try(each.value.info.properties.version, null)
-  version_set_id = try(azurerm_api_management_api_version_set.main[each.value.info.properties.apiVersionSet.versionSetName].id, null)
+  version        = try(each.value.properties.apiVersionSet.version, null)
+  version_set_id = try(azurerm_api_management_api_version_set.main[each.value.properties.apiVersionSet.versionSetName].id, null)
 
   # Subscription key parameter names
   dynamic "subscription_key_parameter_names" {
     # Only create if subscriptionKeyParameterNames is defined in API information file
-    for_each = can(each.value.info.properties.subscriptionKeyParameterNames) ? ["true"] : []
+    for_each = can(each.value.properties.subscriptionKeyParameterNames) ? ["true"] : []
     content {
-      header = each.value.info.properties.subscriptionKeyParameterNames.header
-      query  = each.value.info.properties.subscriptionKeyParameterNames.query
+      header = each.value.properties.subscriptionKeyParameterNames.header
+      query  = each.value.properties.subscriptionKeyParameterNames.query
     }
   }
 
   # License
   dynamic "license" {
     # Only create if license is defined in API information file
-    for_each = can(each.value.info.properties.license) ? ["true"] : []
+    for_each = can(each.value.properties.license) ? ["true"] : []
     content {
       # Only create each property if value exists in specification file
-      name = try(each.value.info.properties.license.name, null)
-      url  = try(each.value.info.properties.license.url, null)
+      name = try(each.value.properties.license.name, null)
+      url  = try(each.value.properties.license.url, null)
     }
   }
 
   # Contact
   dynamic "contact" {
     # Only create if contact is defined in API information file
-    for_each = can(each.value.info.properties.contact) ? ["true"] : []
+    for_each = can(each.value.properties.contact) ? ["true"] : []
     content {
       # Only create each property if value exists in specification file
-      name  = try(each.value.info.properties.contact.name, null)
-      email = try(each.value.info.properties.contact.email, null)
-      url   = try(each.value.info.properties.contact.url, null)
+      name  = try(each.value.properties.contact.name, null)
+      email = try(each.value.properties.contact.email, null)
+      url   = try(each.value.properties.contact.url, null)
     }
   }
 
   # Import specification file
   import {
-    content_format = endswith(local.api_specification_file, ".json") ? "openapi+json" : "openapi"
-    content_value  = file(each.value.spec_file_name)
+    content_format = endswith(local.api_specification_file, ".json") ? "openapi+json" : "openapi" # var.api_specification_filename validation guarantees it's either .json or .yaml
+    content_value  = replace(templatefile(each.value.spec_file_name, var.template_variables), local.route_path_base_to_remove, "")
   }
 
   lifecycle {
+
+    # 'name' is just a convenience for easier code navigation, the directroy name is used as a resource name
+    # make sure there are no accidental mismatches between "name" in json (if present) and directory name
+    precondition {
+      condition     = each.key == try(each.value.properties.name, each.key)
+      error_message = "Property 'name' (${each.value.properties.name}) does not match directory name (${each.key})"
+    }
+
     # Checking if no path is set to be allowed, and the actual value of the path property.
     # Set var.allow_api_without_path to false or true to choose between if the path property should be mandatory or not.
     postcondition {
@@ -149,6 +174,7 @@ resource "azurerm_api_management_api" "main" {
       error_message = "API without path is not allowed. Set 'allow_api_without_path' to 'true' to allow this."
     }
   }
+
 
   depends_on = [azurerm_api_management_tag.main]
 }
@@ -170,7 +196,22 @@ resource "azurerm_api_management_api_policy" "main" {
   resource_group_name = data.azurerm_api_management.main.resource_group_name
 
   api_name    = azurerm_api_management_api.main[each.key].name
-  xml_content = each.value.content
+  xml_content = each.value.xml_content
+}
+
+resource "azurerm_api_management_logger" "main" {
+  count = local.application_insights_enabled ? 1 : 0
+
+  # A logger per API collection (i.e. a module call)... multiple loggers are not recommended
+  name                = local.application_insights_logger_name
+  api_management_name = data.azurerm_api_management.main.name
+  resource_group_name = data.azurerm_api_management.main.resource_group_name
+
+  application_insights {
+    instrumentation_key = data.azurerm_application_insights.main[0].instrumentation_key
+  }
+
+  depends_on = [azurerm_api_management_api.main]
 }
 
 # Diagnostic log settings for API
@@ -179,40 +220,39 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   api_management_name      = data.azurerm_api_management.main.name
   resource_group_name      = data.azurerm_api_management.main.resource_group_name
-  api_management_logger_id = "${data.azurerm_api_management.main.id}/loggers/${data.azurerm_application_insights.main[0].name}"
+  api_management_logger_id = azurerm_api_management_logger.main[0].id
+  api_name                 = azurerm_api_management_api.main[each.key].name # forces dependency
+  identifier               = "applicationinsights"
 
-  api_name   = azurerm_api_management_api.main[each.key].name # forces dependency
-  identifier = "applicationinsights"
-
-  sampling_percentage       = try(each.value.info.properties.diagnosticLogs.samplingPercentage, 100)
-  always_log_errors         = try(each.value.info.properties.diagnosticLogs.alwaysLogErrors, false)
-  log_client_ip             = try(each.value.info.properties.diagnosticLogs.logClientIp, true)
-  verbosity                 = try(each.value.info.properties.diagnosticLogs.verbosity, "information")
-  http_correlation_protocol = try(each.value.info.properties.diagnosticLogs.correlationProtocol, "Legacy")
-  operation_name_format     = try(each.value.info.properties.diagnosticLogs.operationNameFormat, "Name")
+  sampling_percentage       = try(each.value.diagnosticLogs.samplingPercentage, 100)
+  always_log_errors         = try(each.value.diagnosticLogs.alwaysLogErrors, false)
+  log_client_ip             = try(each.value.diagnosticLogs.logClientIp, true)
+  verbosity                 = try(each.value.diagnosticLogs.verbosity, "information")
+  http_correlation_protocol = try(each.value.diagnosticLogs.correlationProtocol, "Legacy")
+  operation_name_format     = try(each.value.diagnosticLogs.operationNameFormat, "Name")
 
   # Advanced options
   ## Frontend request
   dynamic "frontend_request" {
-    for_each = can(each.value.info.properties.diagnosticLogs.frontendRequests) ? ["true"] : []
+    for_each = can(each.value.diagnosticLogs.frontendRequests) ? ["true"] : []
     content {
-      headers_to_log = each.value.info.properties.diagnosticLogs.frontendRequests.headersToLog
-      body_bytes     = each.value.info.properties.diagnosticLogs.frontendRequests.bodyBytes
+      headers_to_log = each.value.diagnosticLogs.frontendRequests.headersToLog
+      body_bytes     = each.value.diagnosticLogs.frontendRequests.bodyBytes
       dynamic "data_masking" {
-        for_each = can(each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking) ? ["true"] : []
+        for_each = can(each.value.diagnosticLogs.frontendRequests.dataMasking) ? ["true"] : []
         content {
           dynamic "headers" {
-            for_each = can(each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking.headers) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.frontendRequests.dataMasking.headers) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking.headers.mode
-              value = each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking.headers.value
+              mode  = each.value.diagnosticLogs.frontendRequests.dataMasking.headers.mode
+              value = each.value.diagnosticLogs.frontendRequests.dataMasking.headers.value
             }
           }
           dynamic "query_params" {
-            for_each = can(each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking.queryParams) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.frontendRequests.dataMasking.queryParams) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking.queryParams.mode
-              value = each.value.info.properties.diagnosticLogs.frontendRequests.dataMasking.queryParams.value
+              mode  = each.value.diagnosticLogs.frontendRequests.dataMasking.queryParams.mode
+              value = each.value.diagnosticLogs.frontendRequests.dataMasking.queryParams.value
             }
           }
         }
@@ -222,7 +262,7 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ### If removed from JSON, set values to null
   dynamic "frontend_request" {
-    for_each = can(each.value.info.properties.diagnosticLogs.frontendRequests) ? [] : ["false"]
+    for_each = can(each.value.diagnosticLogs.frontendRequests) ? [] : ["false"]
     content {
       headers_to_log = null
       body_bytes     = null
@@ -231,25 +271,25 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ## Frontend response
   dynamic "frontend_response" {
-    for_each = can(each.value.info.properties.diagnosticLogs.frontendResponse) ? ["true"] : []
+    for_each = can(each.value.diagnosticLogs.frontendResponse) ? ["true"] : []
     content {
-      headers_to_log = each.value.info.properties.diagnosticLogs.frontendResponse.headersToLog
-      body_bytes     = each.value.info.properties.diagnosticLogs.frontendResponse.bodyBytes
+      headers_to_log = each.value.diagnosticLogs.frontendResponse.headersToLog
+      body_bytes     = each.value.diagnosticLogs.frontendResponse.bodyBytes
       dynamic "data_masking" {
-        for_each = can(each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking) ? ["true"] : []
+        for_each = can(each.value.diagnosticLogs.frontendResponse.dataMasking) ? ["true"] : []
         content {
           dynamic "headers" {
-            for_each = can(each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking.headers) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.frontendResponse.dataMasking.headers) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking.headers.mode
-              value = each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking.headers.value
+              mode  = each.value.diagnosticLogs.frontendResponse.dataMasking.headers.mode
+              value = each.value.diagnosticLogs.frontendResponse.dataMasking.headers.value
             }
           }
           dynamic "query_params" {
-            for_each = can(each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking.queryParams) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.frontendResponse.dataMasking.queryParams) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking.queryParams.mode
-              value = each.value.info.properties.diagnosticLogs.frontendResponse.dataMasking.queryParams.value
+              mode  = each.value.diagnosticLogs.frontendResponse.dataMasking.queryParams.mode
+              value = each.value.diagnosticLogs.frontendResponse.dataMasking.queryParams.value
             }
           }
         }
@@ -259,7 +299,7 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ### If removed from JSON, set values to null
   dynamic "frontend_response" {
-    for_each = can(each.value.info.properties.diagnosticLogs.frontendResponse) ? [] : ["false"]
+    for_each = can(each.value.diagnosticLogs.frontendResponse) ? [] : ["false"]
     content {
       headers_to_log = null
       body_bytes     = null
@@ -268,25 +308,25 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ## Backend request
   dynamic "backend_request" {
-    for_each = can(each.value.info.properties.diagnosticLogs.backendRequest) ? ["true"] : []
+    for_each = can(each.value.diagnosticLogs.backendRequest) ? ["true"] : []
     content {
-      headers_to_log = each.value.info.properties.diagnosticLogs.backendRequest.headersToLog
-      body_bytes     = each.value.info.properties.diagnosticLogs.backendRequest.bodyBytes
+      headers_to_log = each.value.diagnosticLogs.backendRequest.headersToLog
+      body_bytes     = each.value.diagnosticLogs.backendRequest.bodyBytes
       dynamic "data_masking" {
-        for_each = can(each.value.info.properties.diagnosticLogs.backendRequest.dataMasking) ? ["true"] : []
+        for_each = can(each.value.diagnosticLogs.backendRequest.dataMasking) ? ["true"] : []
         content {
           dynamic "headers" {
-            for_each = can(each.value.info.properties.diagnosticLogs.backendRequest.dataMasking.headers) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.backendRequest.dataMasking.headers) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.backendRequest.dataMasking.headers.mode
-              value = each.value.info.properties.diagnosticLogs.backendRequest.dataMasking.headers.value
+              mode  = each.value.diagnosticLogs.backendRequest.dataMasking.headers.mode
+              value = each.value.diagnosticLogs.backendRequest.dataMasking.headers.value
             }
           }
           dynamic "query_params" {
-            for_each = can(each.value.info.properties.diagnosticLogs.backendRequest.dataMasking.queryParams) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.backendRequest.dataMasking.queryParams) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.backendRequest.dataMasking.queryParams.mode
-              value = each.value.info.properties.diagnosticLogs.backendRequest.dataMasking.queryParams.value
+              mode  = each.value.diagnosticLogs.backendRequest.dataMasking.queryParams.mode
+              value = each.value.diagnosticLogs.backendRequest.dataMasking.queryParams.value
             }
           }
         }
@@ -296,7 +336,7 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ### If removed from JSON, set values to null
   dynamic "backend_request" {
-    for_each = can(each.value.info.properties.diagnosticLogs.backendRequest) ? [] : ["false"]
+    for_each = can(each.value.diagnosticLogs.backendRequest) ? [] : ["false"]
     content {
       headers_to_log = null
       body_bytes     = null
@@ -305,25 +345,25 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ## Backend response
   dynamic "backend_response" {
-    for_each = can(each.value.info.properties.diagnosticLogs.backendResponse) ? ["true"] : []
+    for_each = can(each.value.diagnosticLogs.backendResponse) ? ["true"] : []
     content {
-      headers_to_log = each.value.info.properties.diagnosticLogs.backendResponse.headersToLog
-      body_bytes     = each.value.info.properties.diagnosticLogs.backendResponse.bodyBytes
+      headers_to_log = each.value.diagnosticLogs.backendResponse.headersToLog
+      body_bytes     = each.value.diagnosticLogs.backendResponse.bodyBytes
       dynamic "data_masking" {
-        for_each = can(each.value.info.properties.diagnosticLogs.backendResponse.dataMasking) ? ["true"] : []
+        for_each = can(each.value.diagnosticLogs.backendResponse.dataMasking) ? ["true"] : []
         content {
           dynamic "headers" {
-            for_each = can(each.value.info.properties.diagnosticLogs.backendResponse.dataMasking.headers) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.backendResponse.dataMasking.headers) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.backendResponse.dataMasking.headers.mode
-              value = each.value.info.properties.diagnosticLogs.backendResponse.dataMasking.headers.value
+              mode  = each.value.diagnosticLogs.backendResponse.dataMasking.headers.mode
+              value = each.value.diagnosticLogs.backendResponse.dataMasking.headers.value
             }
           }
           dynamic "query_params" {
-            for_each = can(each.value.info.properties.diagnosticLogs.backendResponse.dataMasking.queryParams) ? ["true"] : []
+            for_each = can(each.value.diagnosticLogs.backendResponse.dataMasking.queryParams) ? ["true"] : []
             content {
-              mode  = each.value.info.properties.diagnosticLogs.backendResponse.dataMasking.queryParams.mode
-              value = each.value.info.properties.diagnosticLogs.backendResponse.dataMasking.queryParams.value
+              mode  = each.value.diagnosticLogs.backendResponse.dataMasking.queryParams.mode
+              value = each.value.diagnosticLogs.backendResponse.dataMasking.queryParams.value
             }
           }
         }
@@ -333,7 +373,7 @@ resource "azurerm_api_management_api_diagnostic" "main" {
 
   ### If removed from JSON, set values to null
   dynamic "backend_request" {
-    for_each = can(each.value.info.properties.diagnosticLogs.backendResponse) ? [] : ["false"]
+    for_each = can(each.value.diagnosticLogs.backendResponse) ? [] : ["false"]
     content {
       headers_to_log = null
       body_bytes     = null

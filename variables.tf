@@ -40,6 +40,12 @@ variable "application_insights_resource_group_name" {
   default     = null
 }
 
+variable "application_insights_logger_name" {
+  description = "(Optional) The logger name to use for diagnostic logs. Needs to be unique per module call. If not passed, a random hash will be used."
+  type        = string
+  default     = null
+}
+
 # Filenames
 
 ## apiVersionSets
@@ -73,12 +79,6 @@ variable "api_policy_filename" {
   default     = "policy.xml"
 }
 
-variable "api_policy_fallback_to_default_filename" {
-  description = "(Optional) Option to fallback to policy.xml if policy file in var.api_policy_filename doesn't exist."
-  type        = bool
-  default     = false
-}
-
 ## api operations
 ## note - we reuse API policy file name for operation policy file name
 variable "api_operation_filename" {
@@ -102,6 +102,13 @@ variable "certificates_information_filename" {
   default     = "certificatesInformation.json"
 }
 
+## gateways
+variable "gateway_information_filename" {
+  description = "(Optional) Filename for the gateway configuration file."
+  type        = string
+  default     = "gatewayInformation.json"
+}
+
 ## groups
 variable "groups_information_filename" {
   description = "(Optional) Filename for the groups configuration file."
@@ -115,6 +122,19 @@ variable "named_value_information_filename" {
   type        = string
   default     = "namedValueInformation.json"
 }
+
+## policy fragments
+variable "policy_fragment_information_filename" {
+  description = "(Optional) Filename for the policy fragment configuration file."
+  type        = string
+  default     = "policyFragmentInformation.json"
+}
+variable "policy_fragment_content_filename" {
+  description = "(Optional) Filename for the policy fragment XML content file."
+  type        = string
+  default     = "policy-fragment.xml"
+}
+
 
 ## products
 variable "product_information_filename" {
@@ -141,3 +161,12 @@ variable "tags_information_filename" {
   type        = string
   default     = "tagsInformation.json"
 }
+
+## template expansion.
+# Note: only those files that we use at the moment are handled as tempates. The rest is TBD to replace file() with templatefile() when needed.
+variable "template_variables" {
+  description = "(Optional) A Map of variables to be passed to template expansion. All XML and JSON files are templates. See terraform 'templatefile' for details."
+  type        = map(any)
+  default     = {}
+}
+

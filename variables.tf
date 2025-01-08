@@ -149,12 +149,6 @@ variable "product_policy_filename" {
   default     = "policy.xml"
 }
 
-variable "product_policy_fallback_to_default_filename" {
-  description = "(Optional) Option to fallback to policy.xml if policy file in var.product_policy_filename doesn't exist."
-  type        = bool
-  default     = false
-}
-
 ## tags
 variable "tags_information_filename" {
   description = "(Optional) Filename for the tags configuration file."
